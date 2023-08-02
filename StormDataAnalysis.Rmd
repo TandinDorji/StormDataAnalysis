@@ -1,0 +1,247 @@
+---
+title: "US NOAA Storm Data Analysis"
+author: "Tandin Dorji"
+date: "2023-08-02"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      cache = TRUE)
+```
+
+# Data processing
+
+
+As this analysis is not a complete data analysis project, it will not follow the standard delineation of data work. This section, while titled data processing will only deal with importing the data. The actual data processing work will be performed later in the exploratory data analysis section based on the need to process the data to answer specific questions. 
+
+
+## Load libraries and data
+
+- Load libraries
+- Read data
+
+```{r download-Data, eval=FALSE, echo=FALSE}
+# uncomment to download data again
+# url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+# tempFile <- download.file(url, "Dataset/StormData.csv")
+# rm(url)
+```
+
+
+```{r read-Data, warning=FALSE, message=FALSE}
+# load/install required libraries
+require(tidyverse)
+if(!require(treemap)) {
+        install.packages("treemap")
+        library(treemap)
+}
+
+
+# read and check original dataset 
+sd <- read.csv("Dataset/StormData.csv", header = TRUE)
+dim(sd)
+# head(sd)
+# str(sd)
+names(sd)
+```
+
+
+## Check data and preprocess
+- Check data
+- Select required variables
+```{r select-Variables}
+# select only required variables for analysis
+storm <- sd[, c(8, 23:28, 36)]
+rm(sd)
+gc()
+head(storm)
+```
+
+
+# (Exploratory) Data analysis
+
+In this section, we will do an exploratory analysis of the storm data to look at events which are most harmful to population health and economy.
+
+
+## Events that are most harmful to population health
+
+- Aggregate data by event type to find total fatality and injury
+- Generate plots for above
+
+```{r fatality-injury}
+# Across the United States, which types of events
+# (as indicated in the EVTYPE variable) are most harmful
+# with respect to population health?
+fatality <- storm %>% 
+        group_by(EVTYPE) %>% 
+        summarise(Total.Fatalities = sum(FATALITIES)) %>% 
+        arrange(desc(Total.Fatalities))
+
+
+lrow <- nrow(fatality) # number of observation for data frame subsetting/indexing
+
+
+fatality.summ <- data.frame("Event.Type" = c((fatality$EVTYPE[1:10]), "Others"),
+                            "Fatality" = c(fatality$Total.Fatalities[1:10], 
+                                           sum(fatality$Total.Fatalities[11:lrow])))
+
+
+injury <- storm %>% 
+        group_by(EVTYPE) %>% 
+        summarise(Total.Injuries = sum(INJURIES)) %>% 
+        arrange(desc(Total.Injuries))
+
+
+injury.summ <- data.frame("Event.Type" = c((injury$EVTYPE[1:10]), "Others"),
+                            "Injury" = c(injury$Total.Injuries[1:10], 
+                                           sum(injury$Total.Injuries[11:lrow])))
+
+
+odr <- seq(1:11) # to reorder x-axis/bars from highest to lowest, others
+
+
+fatality.plot <- ggplot(fatality.summ, 
+               aes(x = reorder(Event.Type, odr), y = Fatality)) + 
+        geom_bar(stat = "identity", aes(fill = Event.Type)) + 
+        labs(title = "Fatality by event type") +
+        theme(
+                axis.text.x = element_text(angle = 45, hjust = 1),
+                axis.title.x = element_blank(),
+                legend.position = "none"
+        )
+
+
+injury.plot <- ggplot(injury.summ, 
+                      aes(x = reorder(Event.Type, odr), y = Injury)) + 
+        geom_bar(stat = "identity", aes(fill = Event.Type)) + 
+        labs(title = "Injury by event type") +
+        theme(
+                axis.text.x = element_text(angle = 45, hjust = 1),
+                axis.title.x = element_blank(),
+                legend.position = "none"
+        )
+
+```
+
+
+
+
+## Economic impact analysis
+
+
+In this subsection, we will find the events that have the greatest economic consequences. For this analysis, the total economic value of the damages due to an event will be taken as the sum of nominal dollar value of damage to property and crops.
+
+First, let us check the above data to see if we have the required data to perform this calculation.
+
+### Check Data and Impute Values
+```{r crop-data-check}
+table(storm$CROPDMGEXP)
+incorrect <- storm[storm$CROPDMGEXP %in% c("?", "0", "2"), 6:7]
+table(incorrect)
+sum(table(incorrect))
+# boxplot(storm$CROPDMG, horizontal = TRUE)
+# hist(storm$CROPDMG)
+```
+
+All crop damage values with crop damage magnitude as blank, ?, 0 or 2 will be replaced by zero and xp recoded as 0. 'k' and 'm' will be recoded as K and M respectively for uniformity.
+
+
+```{r crop-data-impute}
+storm[storm$CROPDMGEXP %in% c("", "?", "0", "2"), 6:7] <- 0
+storm[storm$CROPDMGEXP %in% c("k"), 7] <- "K"
+storm[storm$CROPDMGEXP %in% c("m"), 7] <- "M"
+table(storm$CROPDMGEXP)
+sum(table(storm$CROPDMGEXP))
+```
+ 
+It is confirmed that all `r format(nrow(storm), big.mark = ',')` rows of data have crop damage magnitude as either 0, B, K or M. 
+
+
+We will do a similar transformation for property damage value and magnitudes. All property damage values with property damage magnitude other than K, M/m, or B will be replaced by zero and xp recoded as 0. 'k' and 'm' will be recoded as K and M respectively for uniformity
+
+
+```{r property-data-check-impute}
+table(storm$PROPDMGEXP)
+storm[!(storm$PROPDMGEXP %in% c("K", "m", "M", "B")), 4:5] <- 0
+storm[storm$PROPDMGEXP %in% c("k"), 5] <- "K"
+storm[storm$PROPDMGEXP %in% c("m"), 5] <- "M"
+table(storm$PROPDMGEXP)
+sum(table(storm$PROPDMGEXP))
+```
+
+
+As we now have crop and property damage figures in numbers and magnitude in characters, we will transform the magnitude to their numeric equivalent to obtain the total dollar value.
+
+
+### Transform data to get dollar values
+
+For this, we will first create two new variables to store the numeric values of the damage magnitudes and then calculate the total dollar value of damages per event by multiplying the damage amounts with their magnitudes. For ease of presentation, the total damage amount will be computed in billions of nominal dollars. 
+
+
+```{r transform-damage-data}
+Prop.XP <- case_match(storm$PROPDMGEXP,
+                      "K" ~ 1e3,
+                      "M" ~ 1e6,
+                      "B" ~ 1e9,
+                      .default = 1)
+
+Crop.XP <- case_match(storm$CROPDMGEXP,
+                      "K" ~ 1e3,
+                      "M" ~ 1e6,
+                      "B" ~ 1e9,
+                      .default = 1)
+storm <- cbind(storm, Prop.XP, Crop.XP)
+storm$Damage.Value <-  (storm$PROPDMG * storm$Prop.XP + 
+                                storm$CROPDMG * storm$Crop.XP)/1e9
+```
+
+
+With this we now have the total value of damage for all of the recorded events. This data can now be used to find the total economic consequence of these events as follows.
+
+
+### Group data and generate treemap
+
+
+Among other options, we will use a treemap to visually see, at a glance the events that have had the most economic consequence. For this, we will aggregate the total damage values of all events by their event type and find the percentage of the total damage attributable to the event.
+
+
+```{r economic-damage-df}
+economic.plot <- storm %>% 
+        group_by(EVTYPE) %>% 
+        summarise(DMG.VAL = sum(Damage.Value)) %>% 
+        mutate(Event.Percent = 
+                       paste0(EVTYPE, "\n", 
+                              round(DMG.VAL/sum(DMG.VAL)*100, 2), "%" ))
+
+```
+
+
+# Results
+
+
+## Fatality and Injury
+
+```{r fatality-injury-plot, echo=FALSE, fig.height = 4.5}
+fatality.plot
+injury.plot
+```
+
+
+
+## Economic consequences
+```{r economic-damage-plot, echo=FALSE}
+treemap(
+        economic.plot,
+        index = "Event.Percent",
+        vSize = "DMG.VAL",
+        type = "index",
+        title = "Events and their economic consequences"
+        )
+```
+
+
+## Discussion of result
+
+
+This brief analysis of the US NOAA storm data offers some useful insights on the impact of natural disasters on population health and economy. Tornado appears to be the top event that causes the highest death, injury and third highest damage to property/crop. Next, flashflood and flood are top causes of economic damage and is among the top then causes of fatality and injury. While heat, excessive heat and lightning are highly fatal and injurious events, they do not have significant economic impact. Overall, the top ten events causes more fatality, injury and economic damage than the rest 975 events combined.
