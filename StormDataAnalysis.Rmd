@@ -10,6 +10,17 @@ knitr::opts_chunk$set(echo = TRUE,
                       cache = TRUE)
 ```
 
+
+# Synopsis
+This mini data analysis project will study the US NOAA's storm dataset. While the primary goal of this project is to use tools for undertaking reproducible research in data analysis, the project will answer the following questions regarding the data:
+
+- Which events are most harmful to population health (in terms of fatality and injury caused) and economy (in terms of total damages to property and crop)?
+
+To achieve these two goals, this data analysis will process the data and make necessary transformation to the data to answer the above questions. Finally, the result of the analysis will be presented in the forms of bar graphs and treemap.
+
+
+
+
 # Data processing
 
 
